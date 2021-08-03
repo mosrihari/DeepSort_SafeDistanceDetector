@@ -1,0 +1,8 @@
+Please download YOLO weights from the below video description box
+
+https://www.youtube.com/watch?v=zi-62z-3c4U&list=WL&index=1&t=435s
+
+Run Convert.py to convert to tf format
+
+Encoder file:
+https://github.com/Qidian213/deep_sort_yolov3/blob/master/model_data/mars-small128.pb

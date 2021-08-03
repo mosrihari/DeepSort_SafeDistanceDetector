@@ -7,18 +7,21 @@ from deep_sort.tracker import Tracker
 from deep_sort.preprocessing import non_max_suppression
 from tools import generate_detections as gdet
 from yolov3_tf2.dataset import transform_images
-from yolov3_tf2.utils import load_darknet_weights, convert_boxes
+from yolov3_tf2.utils import convert_boxes
 from yolov3_tf2.models import YoloV3
 from absl import flags
 from scipy.spatial import distance as dist
-import matplotlib.pyplot as plt
 import sys
 FLAGS = flags.FLAGS
 FLAGS(sys.argv)
+from utils.birdeye import four_point_transform, compute_point_perspective_transformation
 from _collections import deque
 
-
-# Refer this https://github.com/basileroth75/covid-social-distancing-detection
+COLOR_RED = (0, 0, 255)
+COLOR_GREEN = (0, 255, 0)
+COLOR_BLUE = (255, 0, 0)
+BIG_CIRCLE = 60
+SMALL_CIRCLE = 3
 
 #################################################################################################
 ## STEP 1: Define YOLO with weights from weights folder (FOR DETECTION)                         #
@@ -57,6 +60,19 @@ out = cv2.VideoWriter('./data/video/results.avi', codec, vid_fps, (vid_width, vi
 pts = [deque(maxlen=30) for _ in range(1000)]
 counter = []
 
+# Bird's eye
+four_points = [(int(vid_height), int(0)), (int(vid_height), int(vid_width)),
+                (int(0), int(0)), (int(0), int(vid_width))]
+four_points = str(four_points)
+pts = np.array(eval(four_points), dtype="float32")
+matrix, imgOutput = four_point_transform(cv2.imread("data/video/capture1.png"),pts)
+height,width,_ = imgOutput.shape
+blank_image = np.zeros((height,width,3), np.uint8)
+height = blank_image.shape[0]
+width = blank_image.shape[1]
+dim = (width, height)
+out1 = cv2.VideoWriter('./data/video/results_circle.avi', codec, vid_fps, (width, height))
+
 while True:
     violate = set()
     bounding_box_list = []
@@ -64,6 +80,9 @@ while True:
     if img is None:
         print('Completed')
         break
+    bird_view_img = cv2.resize(img, dim, interpolation=cv2.INTER_AREA)
+    blank_image = np.zeros((bird_view_img.shape[0], bird_view_img.shape[1], 3), np.float32)
+    black_image = cv2.resize(blank_image, dim, interpolation=cv2.INTER_AREA)
     centroids = []
     img_in = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
     img_in = tf.expand_dims(img_in, 0)
@@ -106,25 +125,30 @@ while True:
             centerCoord = (int((x1+x2) / 2), int((y1+y2)/2))
             centroids.append(centerCoord)
             bounding_box_list.append(bounding_box)
+
     if(len(centroids) != 0):
-        D = dist.cdist(centroids, centroids, metric="euclidean")
-        print(D)
+        transformed_downoids = compute_point_perspective_transformation(matrix, centroids)
+        D = dist.cdist(transformed_downoids, transformed_downoids, metric="euclidean")
         for i in range(0, D.shape[0]):
             for j in range(i+1, D.shape[1]):
                 if(D[i,j] < 130):
                     violate.add(i)
                     violate.add(j)
-    for i, box in enumerate(bounding_box_list):
-        (startX, startY, endX, endY) = box
-        color = (0,255,0)
-        if i in violate:
-            color = (0,0,255)
-        cv2.rectangle(img, (int(startX), int(startY)), (int(endX), int(endY)), color, 2)
+        for i, (box, point) in enumerate(zip(bounding_box_list, transformed_downoids)):
+            (startX, startY, endX, endY) = box
+            color = (0,255,0)
+            if i in violate:
+                color = (0,0,255)
+            x, y = point
+            cv2.circle(black_image, (int(x), int(y)), BIG_CIRCLE, color, 2)
+            cv2.circle(black_image, (int(x), int(y)), SMALL_CIRCLE, color, -1)
+            cv2.rectangle(img, (int(startX), int(startY)), (int(endX), int(endY)), color, 2)
 
     cv2.putText(img, f"VIOLATION : {len(violate)}", (200, 500), 0, 0.75, (255,0,0), 2)
-
+    cv2.imshow("Bird view", black_image)
     cv2.imshow('output', img)
     out.write(img)
+    out1.write(black_image)
     if cv2.waitKey(1) == ord('q'):
         break
 vid.release()
